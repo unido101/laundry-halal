@@ -53,6 +53,35 @@ function mDone(o){
   "","*Laundry Halal*","Bersih Pakaiannya, Tenang Ibadahnya."
  ].join("\n");
 }
+
+const KERTAS_MM=58; // ganti 80 jika printer memakai kertas 80mm
+
+function strukHTML(o){
+ const st=o.lunas?"LUNAS":"BELUM LUNAS";
+ const row=(a,b)=>`<div class="sr"><span>${a}</span><span>${b}</span></div>`;
+ return `<div class="c b" style="font-size:15px">LAUNDRY HALAL</div>
+<div class="c">${esc(ADDR)}<br>WA 0852-1228-1263</div><hr>
+${row("Kode",esc(o.id))}${row("Terima",hari(o.ts)+", "+tglS(o.ts))}${row("Jam",jam(o.ts))}${row("Est. selesai",EST)}<hr>
+<div>Customer:</div><div class="b">${esc(o.nama.toUpperCase())}</div><div>${esc(o.wa)}</div>${o.jemput?`<div>Jemput: ${esc(o.alamat)}</div>`:""}<hr>
+<div>${esc(svcName(o))}</div>${row(o.kg+" kg x "+fmt(harga(o)),fmt(o.kg*harga(o)))}
+${o.jemput&&o.biayaJemput?row("Biaya jemput",fmt(o.biayaJemput)):""}<hr>
+<div class="sr b" style="font-size:14px"><span>TOTAL</span><span>${fmt(total(o))}</span></div>
+${row("Status bayar",st)}<hr>
+${o.lunas?"":`<div>${esc(S.set.bayar)}</div><hr>`}
+<div class="c">Mohon periksa kembali cucian Anda setelah selesai.<br>Terima kasih<br><i>Bersih Pakaiannya, Tenang Ibadahnya.</i></div>`;
+}
+
+function cetak(o){
+ if(!(o.kg>0)){toast("Isi berat cucian dulu lewat tombol Ubah.");return}
+ let el=document.getElementById("struk");
+ if(!el){el=document.createElement("div");el.id="struk";document.body.appendChild(el)}
+ let st=document.getElementById("pgs");
+ if(!st){st=document.createElement("style");st.id="pgs";document.head.appendChild(st)}
+ st.textContent=`@page{size:${KERTAS_MM}mm auto;margin:0}#struk{--sw:${KERTAS_MM-10}mm}`;
+ el.innerHTML=strukHTML(o);
+ window.print();
+}
+
 function mPick(o){return hi(o)+"Pesanan *"+o.id+"* sudah kami terima. Kami akan menjemput cucian di:\n"+o.alamat+"\n\nMohon siapkan cucian"+(o.svc==="khusus"?" dan pisahkan pakaian bernajis di kantong khusus":"")+". Terima kasih."+sign}
 
 function card(o){
@@ -66,6 +95,8 @@ ${o.jemput&&o.status==="Baru"?`<a class="btn sm wa" target="_blank" rel="noopene
 ${has?`<a class="btn sm wa" target="_blank" rel="noopener" href="${wl(to,mInvoice(o))}">WA invoice</a>`:`<button class="sm alt" data-a="need">WA invoice</button>`}
 ${fin&&has?`<a class="btn sm wa" target="_blank" rel="noopener" href="${wl(to,mDone(o))}">WA selesai</a>`:""}
 <button class="sm alt" data-a="pay" data-id="${o.id}">${o.lunas?"Batal lunas":"Tandai lunas"}</button>
+<button class="sm alt" data-a="print" data-id="${o.id}">Cetak struk</button>
+<button class="sm alt" data-a="edit" data-id="${o.id}">Ubah</button>
 <button class="sm alt" data-a="edit" data-id="${o.id}">Ubah</button>
 <button class="sm del" data-a="del" data-id="${o.id}">${arm===o.id?"Yakin hapus?":"Hapus"}</button></div></article>`;
 }
@@ -120,6 +151,7 @@ app.addEventListener("click",async e=>{
  else if(a==="need")toast("Isi berat cucian dulu lewat tombol Ubah.");
  else if(a==="next"&&o){o.status=nextSt(o);await put(o);viewAdmin()}
  else if(a==="pay"&&o){o.lunas=!o.lunas;await put(o);viewAdmin()}
+ else if(a==="print"&&o){cetak(o)}
  else if(a==="edit"){editId=id;tab="form";viewAdmin()}
  else if(a==="del"){if(arm===id){S.orders=S.orders.filter(x=>x.id!==id);arm=null;await api("/api/orders?id="+id,"DELETE").catch(()=>toast("Gagal menghapus."))}else{arm=id;setTimeout(()=>{if(arm===id){arm=null;if(tab==="list"||tab==="pick")viewAdmin()}},3000)}viewAdmin()}
  else if(a==="cancel"){editId=null;tab="list";viewAdmin()}

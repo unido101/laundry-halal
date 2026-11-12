@@ -61,3 +61,13 @@ nav.tabs button[aria-current=true]{background:var(--btn);color:var(--btnink);bor
 .hint{background:#fff6fb;border-left-color:var(--pink)}
 .empty{background:#fffafd;border-color:#f9cde5}
 .toast{background:var(--head)}
+#struk{display:none}
+@media print{
+ body>*:not(#struk){display:none!important}
+ html,body{background:#fff!important;margin:0}
+ #struk{display:block;width:var(--sw,48mm);margin:0 auto;padding:2mm 0 8mm;color:#000;background:#fff;font:11px/1.35 "Courier New",ui-monospace,monospace}
+}
+#struk .c{text-align:center}
+#struk .b{font-weight:700}
+#struk .sr{display:flex;justify-content:space-between;gap:6px}
+#struk hr{border:0;border-top:1px dashed #000;margin:6px 0}
