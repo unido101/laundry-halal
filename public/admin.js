@@ -16,8 +16,43 @@ const svcName=o=>o.svc==="khusus"?"Penanganan Khusus":"Reguler (cuci + setrika)"
 const tgl=o=>new Date(o.ts).toLocaleDateString("id-ID",{day:"numeric",month:"long",year:"numeric"});
 const hi=o=>"Halo kak "+o.nama+",\n\n";
 const sign="\n\n_Laundry Halal, Bersih Pakaiannya, Tenang Ibadahnya._";
-function mInvoice(o){return hi(o)+"Terima kasih telah menggunakan *Laundry Halal*.\n\n*INVOICE "+o.id+"*\nTanggal: "+tgl(o)+"\nLayanan: "+svcName(o)+"\nBerat: "+o.kg+" kg x "+rp(harga(o))+"\n"+(o.jemput&&o.biayaJemput?"Biaya jemput: "+rp(o.biayaJemput)+"\n":"")+"*Total: "+rp(total(o))+"*\nStatus: "+(o.lunas?"LUNAS":"Belum dibayar")+(o.lunas?"":"\n\n"+S.set.bayar)+sign}
-function mDone(o){return hi(o)+"Cucian Anda (*"+o.id+"*) sudah *SELESAI* ✅\n\nTotal: "+rp(total(o))+" ("+(o.lunas?"sudah lunas":"belum dibayar")+")\n"+(o.jemput?"Kami akan segera mengantar ke alamat Anda.":"Silakan diambil di "+ADDR+", pukul 08.00–20.00 WIB.")+sign}
+const fmt=x=>Math.round(x||0).toLocaleString("id-ID");
+const WIB={timeZone:"Asia/Jakarta"};
+const hari=ts=>new Date(ts).toLocaleDateString("id-ID",{...WIB,weekday:"long"});
+const tglS=ts=>new Date(ts).toLocaleDateString("en-GB",{...WIB,day:"2-digit",month:"2-digit",year:"2-digit"});
+const jam=ts=>new Date(ts).toLocaleTimeString("en-GB",{...WIB,hour:"2-digit",minute:"2-digit"});
+const sapa=()=>{const h=+new Date().toLocaleString("en-GB",{...WIB,hour:"numeric",hour12:false});return h<11?"Selamat pagi":h<15?"Selamat siang":h<18?"Selamat sore":"Selamat malam"};
+const LINE="=============================";
+const EST="1–2 hari"; // estimasi selesai di struk, ubah sesuai kebutuhan
+
+function mInvoice(o){
+ const st=o.lunas?"Lunas":"Belum Lunas";
+ return [
+  "*Laundry Halal*",ADDR,"WhatsApp 0852-1228-1263",
+  "Kode struk : "+o.id,
+  "Terima : "+hari(o.ts)+", "+tglS(o.ts)+" "+jam(o.ts),
+  "Est. selesai : "+EST,"",
+  "Untuk Customer",o.nama.toUpperCase(),"Total "+st,fmt(total(o)),"",
+  LINE,svcName(o),
+  o.kg+" kg x "+fmt(harga(o))+" = "+fmt(o.kg*harga(o)),
+  ...(o.jemput&&o.biayaJemput?["Biaya jemput = "+fmt(o.biayaJemput)]:[]),
+  LINE,"Total : "+fmt(total(o)),"Status Bayar : "+st,LINE,
+  ...(o.lunas?[]:[S.set.bayar,LINE]),
+  "Mohon periksa kembali cucian Anda setelah selesai.",
+  "==========Terima Kasih========="
+ ].join("\n");
+}
+
+function mDone(o){
+ return [
+  sapa()+" kak "+o.nama,
+  o.jemput?"Laundry sudah selesai dikerjakan dan akan kami antar ke alamat Anda. Terima kasih.":"Laundry sudah selesai dikerjakan dan bisa diambil. Terima kasih.",
+  "","Kode : "+o.id,
+  "Total : "+fmt(total(o))+" ("+(o.lunas?"Lunas":"Belum Lunas")+")",
+  ...(o.jemput?[]:["Ambil di : "+ADDR+", 08.00–20.00 WIB"]),
+  "","*Laundry Halal*","Bersih Pakaiannya, Tenang Ibadahnya."
+ ].join("\n");
+}
 function mPick(o){return hi(o)+"Pesanan *"+o.id+"* sudah kami terima. Kami akan menjemput cucian di:\n"+o.alamat+"\n\nMohon siapkan cucian"+(o.svc==="khusus"?" dan pisahkan pakaian bernajis di kantong khusus":"")+". Terima kasih."+sign}
 
 function card(o){
