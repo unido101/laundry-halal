@@ -6,8 +6,41 @@ async function api(path,method="GET",body){
  if(!r.ok)throw new Error(String(r.status));
  return r.json();
 }
-const put=o=>api("/api/orders","PUT",o).catch(()=>toast("Gagal menyimpan perubahan."));
-async function load(){const[a,b]=await Promise.all([api("/api/orders"),api("/api/settings")]);S.orders=a.orders;S.set={...D,...b}}
+
+/* ----- Data, realtime (polling), dan suara notifikasi ----- */
+let seen=new Set(),busy=0;
+const put=async o=>{busy++;try{await api("/api/orders","PUT",o)}catch(e){toast("Gagal menyimpan perubahan.")}finally{busy--}};
+async function load(){const a=await api("/api/orders");const b=await api("/api/settings");S.orders=a.orders;a.orders.forEach(o=>seen.add(o.id));S.set={...D,...b}}
+const POLL_MS=10000; // jeda cek pesanan baru (ms)
+let suara=localStorage.getItem("lhsuara")!=="0",actx=null;
+function unlock(){try{actx=actx||new(window.AudioContext||window.webkitAudioContext)();if(actx.state==="suspended")actx.resume()}catch(e){}}
+document.addEventListener("click",unlock);document.addEventListener("keydown",unlock);
+const labelSuara=()=>!suara?"🔕 Suara mati":actx&&actx.state==="running"?"🔔 Suara aktif":"🔔 Aktifkan suara";
+function bunyi(){
+ if(!suara||!actx||actx.state!=="running")return;
+ [[880,0],[1175,.18],[880,.36],[1175,.54]].forEach(([f,t])=>{
+  const o=actx.createOscillator(),g=actx.createGain(),s=actx.currentTime+t;
+  o.type="sine";o.frequency.value=f;o.connect(g);g.connect(actx.destination);
+  g.gain.setValueAtTime(0,s);g.gain.linearRampToValueAtTime(.35,s+.02);g.gain.exponentialRampToValueAtTime(.001,s+.16);
+  o.start(s);o.stop(s+.17);
+ });
+}
+const judul=()=>{const n=S.orders.filter(o=>o.status==="Baru").length;document.title=(n?"("+n+") ":"")+"Admin Laundry Halal"};
+const sig=l=>JSON.stringify([...l].sort((x,y)=>x.id<y.id?-1:1));
+async function poll(){
+ if(!pw||busy)return;
+ try{
+  const a=await api("/api/orders");
+  const fresh=a.orders.filter(o=>!seen.has(o.id));
+  a.orders.forEach(o=>seen.add(o.id));
+  if(sig(a.orders)!==sig(S.orders)){S.orders=a.orders;if(tab==="list"||tab==="pick")viewAdmin();else judul()}
+  if(fresh.length){bunyi();judul();toast(fresh.length===1?"Pesanan baru: "+fresh[0].nama+" ("+fresh[0].id+")":fresh.length+" pesanan baru masuk")}
+ }catch(e){}
+}
+setInterval(poll,POLL_MS);
+document.addEventListener("visibilitychange",()=>{if(!document.hidden)poll()});
+
+/* ----- Logika pesanan ----- */
 const flow=o=>o.jemput?["Baru","Dijemput","Diproses","Selesai","Diantar"]:["Baru","Diproses","Selesai","Diambil"];
 const nextSt=o=>flow(o)[flow(o).indexOf(o.status)+1];
 const harga=o=>o.harga||(o.svc==="khusus"?S.set.khu:S.set.reg);
@@ -25,6 +58,7 @@ const sapa=()=>{const h=+new Date().toLocaleString("en-GB",{...WIB,hour:"numeric
 const LINE="=============================";
 const EST="1–2 hari"; // estimasi selesai di struk, ubah sesuai kebutuhan
 
+/* ----- Pesan WhatsApp ----- */
 function mInvoice(o){
  const st=o.lunas?"Lunas":"Belum Lunas";
  return [
@@ -54,6 +88,9 @@ function mDone(o){
  ].join("\n");
 }
 
+function mPick(o){return hi(o)+"Pesanan *"+o.id+"* sudah kami terima. Kami akan menjemput cucian di:\n"+o.alamat+"\n\nMohon siapkan cucian"+(o.svc==="khusus"?" dan pisahkan pakaian bernajis di kantong khusus":"")+". Terima kasih."+sign}
+
+/* ----- Cetak struk thermal ----- */
 const KERTAS_MM=58; // ganti 80 jika printer memakai kertas 80mm
 
 function strukHTML(o){
@@ -82,8 +119,7 @@ function cetak(o){
  window.print();
 }
 
-function mPick(o){return hi(o)+"Pesanan *"+o.id+"* sudah kami terima. Kami akan menjemput cucian di:\n"+o.alamat+"\n\nMohon siapkan cucian"+(o.svc==="khusus"?" dan pisahkan pakaian bernajis di kantong khusus":"")+". Terima kasih."+sign}
-
+/* ----- Tampilan ----- */
 function card(o){
  const has=o.kg>0,to=num(o.wa),n=nextSt(o),fin=["Selesai","Diantar","Diambil"].includes(o.status);
  return `<article class="card"><div class="r"><b>${esc(o.id)}</b><span class="badge">${o.status}</span>${o.svc==="khusus"?'<span class="badge pk">Khusus</span>':""}${o.jemput?'<span class="badge">Jemput</span>':""}${o.lunas?'<span class="badge ok">Lunas</span>':""}</div>
@@ -97,19 +133,18 @@ ${fin&&has?`<a class="btn sm wa" target="_blank" rel="noopener" href="${wl(to,mD
 <button class="sm alt" data-a="pay" data-id="${o.id}">${o.lunas?"Batal lunas":"Tandai lunas"}</button>
 <button class="sm alt" data-a="print" data-id="${o.id}">Cetak struk</button>
 <button class="sm alt" data-a="edit" data-id="${o.id}">Ubah</button>
-<button class="sm alt" data-a="edit" data-id="${o.id}">Ubah</button>
 <button class="sm del" data-a="del" data-id="${o.id}">${arm===o.id?"Yakin hapus?":"Hapus"}</button></div></article>`;
 }
 
 function viewAdmin(){
- document.title="Admin Laundry Halal";
+ judul();
  const O=[...S.orders].sort((a,b)=>b.ts-a.ts),cnt=s=>O.filter(o=>o.status===s).length;
  const done=o=>["Diantar","Diambil"].includes(o.status);
  let body="";
  if(tab==="list"||tab==="pick"){
   let L=tab==="pick"?O.filter(o=>o.jemput&&["Baru","Dijemput"].includes(o.status)):filt==="aktif"?O.filter(o=>!done(o)):filt==="siap"?O.filter(o=>o.status==="Selesai"):filt==="riwayat"?O.filter(done):O;
   const chips=tab==="list"?`<div class="chips">${[["aktif","Aktif"],["siap","Siap diambil"],["riwayat","Riwayat"],["semua","Semua"]].map(c=>`<button data-a="f" data-id="${c[0]}" ${filt===c[0]?'aria-current="true"':""}>${c[1]}</button>`).join("")}</div>`:`<p class="note" style="margin:0 0 12px">Daftar pesanan yang perlu dijemput.</p>`;
-  body=`<div class="stats"><div class="stat"><b>${cnt("Baru")}</b><span>Pesanan baru</span></div><div class="stat"><b>${O.filter(o=>o.jemput&&["Baru","Dijemput"].includes(o.status)).length}</b><span>Perlu dijemput</span></div><div class="stat"><b>${cnt("Diproses")}</b><span>Sedang diproses</span></div><div class="stat"><b>${cnt("Selesai")}</b><span>Siap diambil/diantar</span></div></div>${chips}`+(L.length?`<div class="grid">${L.map(card).join("")}</div>`:`<div class="empty">Belum ada pesanan di sini.<br>Pesanan dari WhatsApp bisa ditempel lewat tab Pesanan baru.</div>`);
+  body=`<div class="stats"><div class="stat"><b>${cnt("Baru")}</b><span>Pesanan baru</span></div><div class="stat"><b>${O.filter(o=>o.jemput&&["Baru","Dijemput"].includes(o.status)).length}</b><span>Perlu dijemput</span></div><div class="stat"><b>${cnt("Diproses")}</b><span>Sedang diproses</span></div><div class="stat"><b>${cnt("Selesai")}</b><span>Siap diambil/diantar</span></div></div>${chips}`+(L.length?`<div class="grid">${L.map(card).join("")}</div>`:`<div class="empty">Belum ada pesanan di sini.<br>Pesanan dari halaman pemesanan akan muncul otomatis.</div>`);
  }else if(tab==="form"){
   const o=S.orders.find(x=>x.id===editId)||{svc:"reguler",jemput:false};
   body=`<div class="panel"><h2>${editId?"Ubah "+editId:"Pesanan baru"}</h2>
@@ -129,10 +164,10 @@ function viewAdmin(){
   <label class="f">Biaya jemput (Rp, 0 jika gratis)<input type="number" id="p3" value="${s.jem}"></label>
   <label class="f">Info pembayaran di invoice<textarea id="p4">${esc(s.bayar)}</textarea></label>
   <button data-a="saves" type="button">Simpan pengaturan</button>
-  <p class="note">Perubahan harga berlaku untuk pesanan baru. Harga di halaman pemesanan pelanggan terpisah, ubah lewat Claude.</p></div>`;
+  <p class="note">Perubahan harga berlaku untuk pesanan baru dan juga tampil di halaman pemesanan pelanggan.</p></div>`;
  }
  const T=[["list","Pesanan"],["pick","Jemputan"],["form","Pesanan baru"],["set","Pengaturan"]];
- app.innerHTML=`<header class="top"><div class="brand">Laundry <span class="pk">Halal</span></div><p>Admin <a href="/">Lihat halaman pesanan</a> <button class="alt sm" data-a="logout" type="button">Keluar</button></p></header>
+ app.innerHTML=`<header class="top"><div class="brand">Laundry <span class="pk">Halal</span></div><p>Admin <a href="/">Lihat halaman pesanan</a> <button class="alt sm" data-a="bell" type="button">${labelSuara()}</button> <button class="alt sm" data-a="logout" type="button">Keluar</button></p></header>
  <main class="wrap adm">
  <nav class="tabs">${T.map(t=>`<button data-a="tab" data-id="${t[0]}" ${tab===t[0]?'aria-current="true"':""}>${t[1]}</button>`).join("")}</nav>${body}</main>`;
 }
@@ -145,7 +180,15 @@ const val=id=>app.querySelector(id).value.trim();
 app.addEventListener("click",async e=>{
  const b=e.target.closest("[data-a]");if(!b||!document.getElementById("app").contains(b))return;
  const a=b.dataset.a,id=b.dataset.id,o=S.orders.find(x=>x.id===id);
- if(a==="logout"){sessionStorage.removeItem("lhpw");pw="";login()}
+ if(a==="bell"){
+  const was=actx&&actx.state==="running";
+  unlock();
+  suara=was?!suara:true;
+  localStorage.setItem("lhsuara",suara?"1":"0");
+  if(suara)setTimeout(bunyi,80);
+  setTimeout(()=>{b.textContent=labelSuara()},150);
+ }
+ else if(a==="logout"){sessionStorage.removeItem("lhpw");pw="";login()}
  else if(a==="tab"){tab=id;editId=null;viewAdmin()}
  else if(a==="f"){filt=id;viewAdmin()}
  else if(a==="need")toast("Isi berat cucian dulu lewat tombol Ubah.");
@@ -165,7 +208,7 @@ app.addEventListener("click",async e=>{
  }
  else if(a==="saveo"){
   if(!val("#n")||num(val("#w")).length<10){toast("Nama dan nomor WhatsApp wajib diisi.");return}
-  if(val("#j")==="on"||app.querySelector("#j").checked){if(!val("#a")){toast("Isi alamat penjemputan.");return}}
+  if(app.querySelector("#j").checked&&!val("#a")){toast("Isi alamat penjemputan.");return}
   const j=app.querySelector("#j").checked,f={nama:val("#n"),wa:val("#w"),svc:val("#s"),kg:parseFloat(val("#k"))||0,jemput:j,alamat:j?val("#a"):"",cat:val("#c")};
   if(editId){const x=S.orders.find(y=>y.id===editId);if(x.svc!==f.svc)x.harga=f.svc==="khusus"?S.set.khu:S.set.reg;Object.assign(x,f);if(j&&!x.biayaJemput)x.biayaJemput=S.set.jem;await put(x)}
   else{await api("/api/orders","POST",f).catch(()=>toast("Gagal menyimpan."));await load()}
@@ -174,7 +217,7 @@ app.addEventListener("click",async e=>{
  else if(a==="saves"){S.set=await api("/api/settings","PUT",{reg:+val("#p1")||0,khu:+val("#p2")||0,jem:+val("#p3")||0,bayar:val("#p4")});tab="list";viewAdmin();toast("Pengaturan tersimpan.")}
 });
 
-
+/* ----- Login & mulai ----- */
 function login(msg){
  document.title="Masuk admin";
  app.innerHTML=`<header class="top"><div class="brand">Laundry <span class="pk">Halal</span></div><p>Admin</p></header><main class="wrap"><div class="panel"><h2>Masuk admin</h2>${msg?`<p class="hint">${msg}</p>`:""}<label class="f">Password<input type="password" id="pw" autocomplete="current-password"></label><button id="go" type="button">Masuk</button></div></main>`;
